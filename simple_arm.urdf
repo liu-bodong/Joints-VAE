@@ -1,0 +1,59 @@
+
+<robot name="patient_0">
+  <link name="base_link">
+    <visual>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+    </visual>
+  </link>
+
+  <joint name="shoulder_rx" type="revolute">
+    <parent link="shoulder_link_y"/>
+    <child link="shoulder_link_x"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="0.87266463" effort="10" velocity="1"/>
+  </joint>
+  <link name="shoulder_link_x"/>
+
+  <joint name="shoulder_ry" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link_y"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57079633" upper="3.14159265" effort="10" velocity="1"/>
+  </joint>
+  <link name="shoulder_link_y"/>
+
+  <joint name="shoulder_rz" type="revolute">
+    <parent link="shoulder_link_x"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57079633" upper="1.57079633" effort="10" velocity="1"/>
+  </joint>
+  <link name="upper_arm_link">
+    <visual>
+      <geometry><cylinder length="0.35" radius="0.03"/></geometry>
+      <origin xyz="0 0 0.165" rpy="0 0 0"/>
+    </visual>
+  </link>
+
+  <joint name="elbow_ry" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0 0 0.35" rpy="0 0 0"/> <axis xyz="0 1 0"/> <limit lower="0" upper="2.61" effort="10" velocity="1"/> </joint>
+  <link name="forearm_link">
+    <visual>
+      <geometry><cylinder length="0.30" radius="0.03"/></geometry>
+      <origin xyz="0 0 0.14" rpy="0 0 0"/>
+    </visual>
+  </link>
+
+  <joint name="wrist_fixed" type="fixed">
+     <parent link="forearm_link"/>
+     <child link="end_effector_link"/>
+     <origin xyz="0 0 0.28" rpy="0 0 0"/>
+   </joint>
+   <link name="end_effector_link"/>
+
+</robot>
