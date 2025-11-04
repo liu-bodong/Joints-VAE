@@ -5,7 +5,7 @@
       <geometry><box size="0.1 0.1 0.1"/></geometry>
     </visual>
   </link>
-
+  
   <joint name="shoulder_rx" type="revolute">
     <parent link="shoulder_link_y"/>
     <child link="shoulder_link_x"/>
@@ -15,6 +15,7 @@
   </joint>
   <link name="shoulder_link_x"/>
 
+  
   <joint name="shoulder_ry" type="revolute">
     <parent link="base_link"/>
     <child link="shoulder_link_y"/>
@@ -23,6 +24,8 @@
     <limit lower="-1.57079633" upper="3.14159265" effort="10" velocity="1"/>
   </joint>
   <link name="shoulder_link_y"/>
+
+
 
   <joint name="shoulder_rz" type="revolute">
     <parent link="shoulder_link_x"/>
