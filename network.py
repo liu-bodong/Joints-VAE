@@ -35,19 +35,19 @@ class FoldingDecoder(nn.Module):
         super().__init__()
         self.num_task_points = num_task_points
         
-        # Create a 2D grid scaffold
+        # create a 2D grid scaffold
         grid = torch.meshgrid(
             torch.linspace(-0.5, 0.5, int(np.sqrt(num_task_points))),
             torch.linspace(-0.5, 0.5, int(np.sqrt(num_task_points)))
         )
         grid = torch.stack(grid, dim=-1).view(-1, 2) # [K, 2]
-        self.register_buffer('grid', grid) # Store as non-parameter buffer
+        self.register_buffer('grid', grid) # store as non-parameter buffer
 
-        # Folding MLP
+        # folding MLP
         self.folding_mlp = nn.Sequential(
             nn.Linear(latent_dim + 2, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, output_dim) # Output 3D coordinates
+            nn.Linear(256, output_dim) # output 3d coords
         )
 
     def forward(self, z):
@@ -60,10 +60,8 @@ class FoldingDecoder(nn.Module):
         # Replicate grid for each batch item
         grid_replicated = self.grid.unsqueeze(0).repeat(batch_size, 1, 1) # [B, K, 2]
 
-        # Concatenate
         x = torch.cat([z_replicated, grid_replicated], dim=2) # [B, K, D_z + 2]
         
-        # Fold
         output_cloud = self.folding_mlp(x) # [B, K, 3]
         return output_cloud
     
