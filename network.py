@@ -10,7 +10,7 @@ import numpy as np
 # FOREARM_LEN = 0.28
 
 
-class PointNetEncoder(nn.Module):
+class Encoder(nn.Module):
     def __init__(self, input_dim=4, global_feat_dim=1024, latent_dim=32):
         super().__init__()
         self.feat_mlp = nn.Sequential(
@@ -30,7 +30,7 @@ class PointNetEncoder(nn.Module):
         logvar = self.fc_logvar(x) # [B, D_z]
         return mu, logvar
 
-class FoldingDecoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(self, latent_dim=32, num_task_points=256, output_dim=3):
         super().__init__()
         self.num_task_points = num_task_points
@@ -81,10 +81,10 @@ class JointLimitDecoder(nn.Module):
         return limits_recon
 
 class fROM_VAE_task(nn.Module):
-    def __init__(self, joint_dim=4, latent_dim=32, num_joint_points=5000, num_task_points=256):
+    def __init__(self, input_dim=4, latent_dim=32, num_task_points=256):
         super().__init__()
-        self.encoder = PointNetEncoder(input_dim=joint_dim, latent_dim=latent_dim)
-        self.decoder = FoldingDecoder(latent_dim=latent_dim, num_task_points=num_task_points)
+        self.encoder = Encoder(input_dim=input_dim, latent_dim=latent_dim)
+        self.decoder = Decoder(latent_dim=latent_dim, num_task_points=num_task_points)
         
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5 * logvar)
@@ -101,7 +101,7 @@ class fROM_VAE_task(nn.Module):
 class fROM_VAE_joints(nn.Module):
     def __init__(self, joint_dim=4, latent_dim=32, global_feat_dim=1024, output_limits_dim=8):
         super().__init__()
-        self.encoder = PointNetEncoder(
+        self.encoder = Encoder(
             input_dim=joint_dim, 
             global_feat_dim=global_feat_dim, 
             latent_dim=latent_dim
