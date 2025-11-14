@@ -1,4 +1,0 @@
-Loading dataset
-Dataset loaded.
-Starting training...
-Epoch 1/5000:  50%|████████████            | 2/4 [00:20<00:20, 10.42s/it, Batch Loss=1.6, Recon Loss=1.6, KL Loss=0.24]

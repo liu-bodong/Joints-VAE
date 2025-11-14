@@ -3,3 +3,5 @@ _pycache_/*
 
 data/*
 images/*
+
+wandb/
