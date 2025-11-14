@@ -1,0 +1,40 @@
+{
+  "os": "Windows-10-10.0.26100-SP0",
+  "python": "CPython 3.10.19",
+  "startedAt": "2025-11-14T04:29:15.036Z",
+  "program": "E:\\dev\\research\\Joints-VAE\\train.py",
+  "codePath": "train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "git@github.com:liu-bodong/Joints-VAE.git",
+    "commit": "f0c26174ea34da70153d91d7542fa850a9bedfc6"
+  },
+  "email": "liubodong04@gmail.com",
+  "root": "E:\\dev\\research\\Joints-VAE",
+  "host": "LAPTOP-EUJ9L7T7",
+  "executable": "D:\\anaconda3\\envs\\torch\\python.exe",
+  "cpu_count": 8,
+  "cpu_count_logical": 16,
+  "gpu": "NVIDIA GeForce RTX 3070 Laptop GPU",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1024207089664",
+      "used": "974139047936"
+    }
+  },
+  "memory": {
+    "total": "17023950848"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 3070 Laptop GPU",
+      "memoryTotal": "8589934592",
+      "cudaCores": 5120,
+      "architecture": "Ampere",
+      "uuid": "GPU-5fe109c3-77cc-cb0b-75d3-e49e6e6948f8"
+    }
+  ],
+  "cudaVersion": "13.0",
+  "writerId": "v4cr6mlade8ygfw0laxr9xbj873gsbcd"
+}

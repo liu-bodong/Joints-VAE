@@ -1,0 +1,26 @@
+Loading dataset
+Dataset loaded.
+Starting training...
+                                                                                                                                                                                                                                                                                                             
+Epoch 1/2000 | Total Loss: 1.5892 | Recon Loss: 1.5890 | KL Loss: 0.2311
+Epoch 100/2000 | Total Loss: 0.6278 | Recon Loss: 0.6141 | KL Loss: 13.6934
+Epoch 200/2000 | Total Loss: 0.6145 | Recon Loss: 0.6037 | KL Loss: 10.8412
+Epoch 300/2000 | Total Loss: 0.6074 | Recon Loss: 0.5977 | KL Loss: 9.6389
+Epoch 400/2000 | Total Loss: 0.6050 | Recon Loss: 0.5950 | KL Loss: 10.0312
+Epoch 500/2000 | Total Loss: 0.5898 | Recon Loss: 0.5791 | KL Loss: 10.6561
+Epoch 600/2000 | Total Loss: 0.5833 | Recon Loss: 0.5722 | KL Loss: 11.1418
+Epoch 700/2000 | Total Loss: 0.5767 | Recon Loss: 0.5653 | KL Loss: 11.4051
+Epoch 800/2000 | Total Loss: 0.5620 | Recon Loss: 0.5487 | KL Loss: 13.2983
+Epoch 900/2000 | Total Loss: 0.5214 | Recon Loss: 0.5025 | KL Loss: 18.8448
+Epoch 1000/2000 | Total Loss: 0.5081 | Recon Loss: 0.4852 | KL Loss: 22.9118
+Epoch 1100/2000 | Total Loss: 0.4849 | Recon Loss: 0.4585 | KL Loss: 26.4520
+Epoch 1200/2000 | Total Loss: 0.4723 | Recon Loss: 0.4445 | KL Loss: 27.8460
+Epoch 1300/2000 | Total Loss: 0.4662 | Recon Loss: 0.4384 | KL Loss: 27.8126
+Epoch 1400/2000 | Total Loss: 0.4615 | Recon Loss: 0.4337 | KL Loss: 27.7694
+Epoch 1500/2000 | Total Loss: 0.4574 | Recon Loss: 0.4297 | KL Loss: 27.6631
+Epoch 1600/2000 | Total Loss: 0.4525 | Recon Loss: 0.4247 | KL Loss: 27.7812
+Epoch 1700/2000 | Total Loss: 0.4420 | Recon Loss: 0.4144 | KL Loss: 27.5594
+Epoch 1800/2000 | Total Loss: 0.4493 | Recon Loss: 0.4201 | KL Loss: 29.1989
+Epoch 1900/2000 | Total Loss: 0.4364 | Recon Loss: 0.4078 | KL Loss: 28.5558
+Epoch 2000/2000 | Total Loss: 0.4362 | Recon Loss: 0.4075 | KL Loss: 28.6313
+Training complete.

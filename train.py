@@ -1,157 +1,155 @@
-import os
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import matplotlib.pyplot as plt
-import time
-import math
-import pandas as pd
+import numpy as np
 import tqdm
+import wandb
 
-import network
+import FK_data_generator
+from network import PointVAE
+from loss_functions import vae_loss_function
 
 
-N_USERS = 10
-M_JOINT_POINTS = 256  # Number of points to sample joint-space
-K_TASK_POINTS = 256   # Number of points to generate in task-space
-LATENT_DIM = 32
-LEARNING_RATE = 1e-4
-EPOCHS = 200
-BATCH_SIZE = 4
-BETA_KL = 0.001 # Weight for KL loss
+def train(num_epochs, learning_rate, batch_size, kl_weight, num_users, points_per_user, latent_dim, train_loader, device):
+    save_path = f"./models/point_vae_N{num_users}_K{points_per_user}_D{latent_dim}.pth"
 
-# Setup device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+    # --- Setup Weights & Biases ---
+    run = wandb.init(
+        entity = "liubodong-cornell-university",
+        project = "ROMA-VAE",
+        name = f"PointVAE_profiles{num_users}_latent{latent_dim}_points{points_per_user}_kl{kl_weight}_lr{learning_rate}_bs{batch_size}",
+        config = {
+            "num_epochs": num_epochs,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            "kl_weight": kl_weight,
+            "num_users": num_users,
+            "points_per_user": points_per_user,
+            "latent_dim": latent_dim
+        },
+        mode = "online"
+    )
 
-# read in user joint limits from CSV
-joint_limits_df = pd.read_csv("joint_limits.csv")
-joint_limits = joint_limits_df.iloc[:, 1:].values
 
-# read in user joint configs from CSV
-joint_configs_df = pd.read_csv("dataset_elbow_bent.csv")
-joint_configs = joint_configs_df.iloc[:, 1:].values
-
-# 3. Create DataLoader
-dataset = TensorDataset(joint_configs, joint_limits)
-# BATCH_SIZE here refers to batch of patients
-dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-# joint_clouds shape: [N, M, 4], joint_limits shape: [N, 8]
-
-# 4. Initialize Model
-# model = network.fROM_VAE_task(joint_dim=4, latent_dim=LATENT_DIM, num_joint_points=M_JOINT_POINTS, num_task_points=K_TASK_POINTS).to(device)
-
-model = network.fROM_VAE_joints(joint_dim=4, latent_dim=LATENT_DIM, global_feat_dim=1024, output_limits_dim=8).to(device)
-
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-recon_loss_fn = nn.MSELoss(reduction='sum')
-# chamfer_loss_fn = ChamferDistance() #
-
-# tain
-for epoch in range(EPOCHS):
-    model.train()
-    total_loss_epoch = 0
-    total_recon_loss_epoch = 0
-    total_kl_loss_epoch = 0
+    # --- Initialize Model ---
+    model = PointVAE(
+        latent_dim=32,
+        num_points_k=points_per_user
+    ).to(device)
     
-    for p_joint_batch, p_limits_batch in dataloader:
-        p_joint_batch = p_joint_batch.to(device)     # [B, M, 4]
-        p_limits_batch = p_limits_batch.to(device) # [B, 8]
-        
-        # Forward pass
-        limits_recon, mu, logvar = model(p_joint_batch) # [B, 8], [B, D_z], [B, D_z]
-        
-        # Calculate Loss
-        # 1. Reconstruction Loss (MSE on the 8 limit values)
-        recon_loss = recon_loss_fn(limits_recon, p_limits_batch)
-        
-        # 2. KL Loss
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        
-        # 3. Total Loss
-        # Normalize losses by batch size to make BETA_KL more independent of batch size
-        loss = (recon_loss / BATCH_SIZE) + (BETA_KL * kl_loss / BATCH_SIZE)
-        
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        total_loss_epoch += loss.item() * BATCH_SIZE
-        total_recon_loss_epoch += recon_loss.item()
-        total_kl_loss_epoch += kl_loss.item()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Print epoch stats
-    avg_loss = total_loss_epoch / len(dataset)
-    avg_recon = total_recon_loss_epoch / len(dataset)
-    avg_kl = total_kl_loss_epoch / len(dataset)
+    # --- Main Training Loop ---
+    print("Starting training...")
+    for epoch in range(num_epochs):
+        
+        epoch_loss = 0.0
+        epoch_recon_loss = 0.0
+        epoch_kld_loss = 0.0
+        
+        progress_bar = tqdm.tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
+        
+        # We get (batch_data,) because our dataset returns a list
+        for (input_cloud,) in progress_bar:
+            
+            input_cloud = input_cloud.to(device)
+            
+            # --- Forward Pass ---
+            recon_cloud, mu, logvar = model(input_cloud)
+            # print(recon_cloud.shape, input_cloud.shape)
+            
+            # --- Calculate Loss ---
+            total_loss, recon_loss, kl_loss = vae_loss_function(
+                recon_cloud,
+                input_cloud,
+                mu,
+                logvar,
+                kl_weight
+            )
+            
+            total_loss = total_loss.mean()
+            recon_loss = recon_loss.mean()
+            kl_loss = kl_loss.mean()
+            
+            # --- Backward Pass ---
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+            
+            # --- Log batch losses ---
+            epoch_loss += total_loss.item()
+            epoch_recon_loss += recon_loss.item()
+            epoch_kld_loss += kl_loss.item()
+            
+            progress_bar.set_postfix({
+                "Batch Loss": total_loss.item(),
+                "Recon Loss": recon_loss.item(),
+                "KL Loss": kl_loss.item()
+            })
+        
+        # --- End of Epoch: Print Averages ---
+        avg_loss = epoch_loss / len(train_loader)
+        avg_recon = epoch_recon_loss / len(train_loader)
+        avg_kld = epoch_kld_loss / len(train_loader)
+        
+        # if (epoch + 1) % 100 == 0 or epoch == 0:
+        #     print(f"Epoch {epoch+1}/{num_epochs} | "
+        #         f"Total Loss: {avg_loss:.4f} | "
+        #         f"Recon Loss: {avg_recon:.4f} | "
+        #         f"KL Loss: {avg_kld:.4f}")
+        
+        run.log({
+            "total_loss": avg_loss,
+            "recon_loss": avg_recon,
+            "kl_loss": avg_kld
+        })
+
+    print("Training complete.")
     
-    if (epoch + 1) % 20 == 0:
-        print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {avg_loss:.4f}, "
-              f"Recon Loss (MSE): {avg_recon:.4f}, KL Loss: {avg_kl:.4f}")
-
-# Training Loop
-# print(f"Starting VAE training with {N_PATIENTS} patients...")
-# for epoch in range(EPOCHS):
-#     model.train()
-#     total_loss_epoch = 0
-#     total_recon_loss_epoch = 0
-#     total_kl_loss_epoch = 0
+    run.finish()
     
-#     for p_joint_batch, p_task_batch in dataloader:
-#         p_joint_batch = p_joint_batch.to(device)
-#         p_task_batch = p_task_batch.to(device)
-        
-#         # Forward pass
-#         p_task_recon, mu, logvar = model(p_joint_batch)
-        
-#         # Calculate Loss
-#         # 1. KL Loss
-#         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-#         kl_loss = kl_loss / (BATCH_SIZE * K_TASK_POINTS * 3) # Average over batch & points
-        
-#         # 2. Reconstruction Loss (Chamfer)
-#         # pytorch-chamfer
-#         dist1, dist2, _, _ = chamfer_loss_fn(p_task_recon, p_task_batch)
-#         recon_loss = (torch.mean(dist1)) + (torch.mean(dist2))
-#         # # pytorch3d
-#         # recon_loss, _ = chamfer_distance(p_task_recon, p_task_batch)
-
-#         # 3. Total Loss
-#         loss = recon_loss + BETA_KL * kl_loss
-        
-#         # Backward pass
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-        
-#         total_loss_epoch += loss.item()
-#         total_recon_loss_epoch += recon_loss.item()
-#         total_kl_loss_epoch += kl_loss.item()
-
-#     # Print epoch stats
-#     avg_loss = total_loss_epoch / len(dataloader)
-#     avg_recon = total_recon_loss_epoch / len(dataloader)
-#     avg_kl = total_kl_loss_epoch / len(dataloader)
+    torch.save(model.state_dict(), save_path)
+    return 1
     
-#     if (epoch + 1) % 10 == 0:
-#         print(f"Epoch [{epoch+1}/{EPOCHS}], Loss: {avg_loss:.6f}, "
-            #   f"Recon Loss (Chamfer): {avg_recon:.6f}, KL Loss: {avg_kl:.6f}")
-
-print("Training finished.")
-
-# --- Step 3: Evaluation Example ---
-# model.eval()
-# with torch.no_grad():
-#     # Get the fROM for the first patient in the dataset
-#     joint_cloud_sample = joint_clouds[0].unsqueeze(0).to(device) # [1, M, 4]
     
-#     # Generate the task-space reconstruction
-#     task_cloud_recon, _, _ = model(joint_cloud_sample) # [1, K, 3]
+if __name__ == "__main__":
+    NUM_EPOCHS = 5000
+    LEARNING_RATE = 1e-5
+    BATCH_SIZE = 320
+    KL_WEIGHT = 1e-3
     
-#     print(f"\nGenerated task cloud shape: {task_cloud_recon.shape}")
-#     # You would now visualize this point cloud (task_cloud_recon)
-#     # using a library like Open3D or matplotlib.
+    NUM_USERS = 1000
+    POINTS_PER_USER = 1024
+    
+    LATENT_DIM = [1, 2, 3, 4, 8, 16, 32, 64, 128]
+    
+    PATH = f"./models/point_vae_N{NUM_USERS}_K{POINTS_PER_USER}_D{LATENT_DIM}.pth"
+    
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {DEVICE}")    
+    
+    # --- Load Data ---
+    print("Loading dataset")
+    all_joints = np.load("./data/joint_data_1000_1024.npy")  # shape: (num_users, num_points_per_user, 4)
+    all_joints = all_joints[:NUM_USERS, :POINTS_PER_USER, :]
+    all_joints_tensor = torch.tensor(all_joints, dtype=torch.float32)
+    dataset = TensorDataset(all_joints_tensor)
+    train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    print("Dataset loaded.")
+    
+    print(f"Configs: ")
+    
+    for dim in LATENT_DIM:
+        train(
+            NUM_EPOCHS,
+            LEARNING_RATE,
+            BATCH_SIZE,
+            KL_WEIGHT,
+            NUM_USERS,
+            POINTS_PER_USER,
+            dim,
+            train_loader,
+            DEVICE
+        )
+    
+    

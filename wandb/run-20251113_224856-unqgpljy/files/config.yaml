@@ -1,0 +1,69 @@
+_wandb:
+    value:
+        cli_version: 0.22.3
+        e:
+            wv4ha0ksr1lovqwf5g31glgu8txjas5w:
+                codePath: train.py
+                codePathLocal: train.py
+                cpu_count: 8
+                cpu_count_logical: 16
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "1024207089664"
+                        used: "974106271744"
+                email: liubodong04@gmail.com
+                executable: D:\anaconda3\envs\torch\python.exe
+                git:
+                    commit: f0c26174ea34da70153d91d7542fa850a9bedfc6
+                    remote: git@github.com:liu-bodong/Joints-VAE.git
+                gpu: NVIDIA GeForce RTX 3070 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 5120
+                      memoryTotal: "8589934592"
+                      name: NVIDIA GeForce RTX 3070 Laptop GPU
+                      uuid: GPU-5fe109c3-77cc-cb0b-75d3-e49e6e6948f8
+                host: LAPTOP-EUJ9L7T7
+                memory:
+                    total: "17023950848"
+                os: Windows-10-10.0.26100-SP0
+                program: E:\dev\research\Joints-VAE\train.py
+                python: CPython 3.10.19
+                root: E:\dev\research\Joints-VAE
+                startedAt: "2025-11-14T03:48:56.179597Z"
+                writerId: wv4ha0ksr1lovqwf5g31glgu8txjas5w
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 13
+                - 16
+            "4": 3.10.19
+            "5": 0.22.3
+            "8":
+                - 2
+                - 3
+            "12": 0.22.3
+            "13": windows-amd64
+batch_size:
+    value: 320
+kl_weight:
+    value: 0.001
+latent_dim:
+    value: 3
+learning_rate:
+    value: 1e-05
+num_epochs:
+    value: 2000
+num_users:
+    value: 2000
+points_per_user:
+    value: 1024

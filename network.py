@@ -1,125 +1,139 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-import numpy as np
-# from chamfer_distance import ChamferDistance # TODO: NOT WORKING!!!!!!
-# from pytorch3d.loss import chamfer_distance
+import torch.nn.functional as F
 
-# UPPER_ARM_LEN = 0.33
-# FOREARM_LEN = 0.28
-
-
-class Encoder(nn.Module):
-    def __init__(self, input_dim=4, global_feat_dim=1024, latent_dim=32):
-        super().__init__()
-        self.feat_mlp = nn.Sequential(
-            nn.Linear(input_dim, 64), nn.ReLU(),
-            nn.Linear(64, 128), nn.ReLU(),
-            nn.Linear(128, global_feat_dim), nn.ReLU()
-        )
-        # VAE head
-        self.fc_mu = nn.Linear(global_feat_dim, latent_dim)
-        self.fc_logvar = nn.Linear(global_feat_dim, latent_dim)
+class PointEncoder(nn.Module):
+    """
+    PointNet-style encoder for a D-dimensional point cloud.
+    Takes [B, N * K, D] -> [B, global_feature_dim]
+    """
+    def __init__(self, input_dims=4, global_feature_dim=1024):
+        super(PointEncoder, self).__init__()
+        self.global_feature_dim = global_feature_dim
         
+        # one data is one entire point cloud of K points in R^K
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dims, 64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, self.global_feature_dim),
+            nn.ReLU()
+        )
+
     def forward(self, x):
-        # x shape: [B, M, 4]
-        x = self.feat_mlp(x)       # [B, M, 1024]
-        x = torch.max(x, 1)[0]     # [B, 1024] (Global max pooling)
-        mu = self.fc_mu(x)         # [B, D_z]
-        logvar = self.fc_logvar(x) # [B, D_z]
-        return mu, logvar
+        point_features = self.mlp(x) # x: [B, K, 4] -> [B, K, 1024]
+        global_feature, _ = torch.max(point_features, dim=1) # [B, 1024]
+        return global_feature
 
-class Decoder(nn.Module):
-    def __init__(self, latent_dim=32, num_task_points=256, output_dim=3):
-        super().__init__()
-        self.num_task_points = num_task_points
+
+class PointDecoder(nn.Module):
+    """
+    MLP-based decoder.
+    Takes [B, latent_dim] -> [B, K, D]
+    """
+    def __init__(self, latent_dim, num_points_k, output_dims=4):
+        super(PointDecoder, self).__init__()
+        self.num_points_k = num_points_k
+        self.output_dims = output_dims
         
-        # create a 2D grid scaffold
-        grid = torch.meshgrid(
-            torch.linspace(-0.5, 0.5, int(np.sqrt(num_task_points))),
-            torch.linspace(-0.5, 0.5, int(np.sqrt(num_task_points)))
-        )
-        grid = torch.stack(grid, dim=-1).view(-1, 2) # [K, 2]
-        self.register_buffer('grid', grid) # store as non-parameter buffer
-
-        # folding MLP
-        self.folding_mlp = nn.Sequential(
-            nn.Linear(latent_dim + 2, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, output_dim) # output 3d coords
+        self.mlp = nn.Sequential(
+            nn.Linear(latent_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1024),
+            nn.ReLU(),
+            # The final layer outputs all K*4 point coordinates at once
+            nn.Linear(1024, self.num_points_k * self.output_dims)
         )
 
     def forward(self, z):
-        # z shape: [B, D_z]
-        batch_size = z.shape[0]
+        # z shape: [B, latent_dim]
         
-        # Replicate z for each grid point
-        z_replicated = z.unsqueeze(1).repeat(1, self.num_task_points, 1) # [B, K, D_z]
+        # 1. Pass latent vector through the MLP
+        flat_point_cloud = self.mlp(z) # Output: [B, K * 4]
         
-        # Replicate grid for each batch item
-        grid_replicated = self.grid.unsqueeze(0).repeat(batch_size, 1, 1) # [B, K, 2]
+        # 2. Reshape to the final point cloud format
+        # Output shape: [B, K, 4]
+        recon_cloud = flat_point_cloud.view(-1, self.num_points_k, self.output_dims)
+        
+        return recon_cloud
 
-        x = torch.cat([z_replicated, grid_replicated], dim=2) # [B, K, D_z + 2]
+
+class PointVAE(nn.Module):
+    """
+    point cloud -> Encoder -> latent (mu, logvar) -> reparameterization (z) -> Decoder -> reconstructed point cloud
+    """
+    def __init__(self, latent_dim, num_points_k, global_feature_dim=1024):
+        super(PointVAE, self).__init__()
         
-        output_cloud = self.folding_mlp(x) # [B, K, 3]
-        return output_cloud
+        self.encoder = PointEncoder(input_dims=4, global_feature_dim=global_feature_dim)
+        self.decoder = PointDecoder(latent_dim=latent_dim, num_points_k=num_points_k)
+        
+        # VAE-specific layers: map global feature to mu and logvar
+        self.fc_mu = nn.Linear(global_feature_dim, latent_dim)
+        self.fc_logvar = nn.Linear(global_feature_dim, latent_dim)
+
+    def reparameterize(self, mu, logvar):
+        """
+        The reparameterization trick (z = mu + epsilon * std).
+        """
+        std = torch.exp(0.5 * logvar)
+        epsilon = torch.randn_like(std)
+        return mu + epsilon * std
+
+    def forward(self, x):
+        # x shape: [B, K, 4]
+        
+        # 1. Encode the cloud to a global feature
+        
+        global_feat = self.encoder(x) # [B, global_feature_dim]
+        
+        # 2. Get latent space parameters
+        
+        mu = self.fc_mu(global_feat) # mu, logvar shapes: [B, latent_dim]
+        logvar = self.fc_logvar(global_feat)
+        
+        # 3. Sample from the latent distribution
+        z = self.reparameterize(mu, logvar) # z shape: [B, latent_dim]
+        
+        # 4. Decode the latent vector back into a point cloud
+        
+        recon_cloud = self.decoder(z) # recon_cloud shape: [B, K, 4]
+        
+        return recon_cloud, mu, logvar
+
+
+# --- Example Usage ---
+if __name__ == "__main__":
     
-class JointLimitDecoder(nn.Module):
-    def __init__(self, latent_dim=32, hidden_dim=256, output_dim=8):
-        super().__init__()
-        # map from latent z to the 8 limit parameters
-        self.decoder_mlp = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim) # Output 8 values
-        )
+    # --- Define model hyperparameters ---
+    LATENT_DIM = 32         # Size of the latent vector z
+    NUM_POINTS_K = 4096     # Number of points per user (must match data)
+    BATCH_SIZE = 8          # Number of point clouds/profiles/users in a batch
+    
+    # --- Create a dummy input batch ---
+    # This simulates one batch from DataLoader
+    # (B, K, 4) in rads
+    dummy_input_cloud = torch.rand(BATCH_SIZE, NUM_POINTS_K, 4)
+    print(f"Input batch shape: {dummy_input_cloud.shape}")
+    
+    # --- Instantiate the VAE ---
+    vae = PointVAE(latent_dim=LATENT_DIM, num_points_k=NUM_POINTS_K)
+    print("\nVAE Model Instantiated:")
+    print(vae)
 
-    def forward(self, z):
-        # z shape: [B, D_z]
-        limits_recon = self.decoder_mlp(z) # [B, 8]
-        return limits_recon
-
-class fROM_VAE_task(nn.Module):
-    def __init__(self, input_dim=4, latent_dim=32, num_task_points=256):
-        super().__init__()
-        self.encoder = Encoder(input_dim=input_dim, latent_dim=latent_dim)
-        self.decoder = Decoder(latent_dim=latent_dim, num_task_points=num_task_points)
-        
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def forward(self, joint_cloud):
-        # joint_cloud shape: [B, M, 4]
-        mu, logvar = self.encoder(joint_cloud)
-        z = self.reparameterize(mu, logvar)
-        task_cloud_recon = self.decoder(z) # [B, K, 3]
-        return task_cloud_recon, mu, logvar
-
-class fROM_VAE_joints(nn.Module):
-    def __init__(self, joint_dim=4, latent_dim=32, global_feat_dim=1024, output_limits_dim=8):
-        super().__init__()
-        self.encoder = Encoder(
-            input_dim=joint_dim, 
-            global_feat_dim=global_feat_dim, 
-            latent_dim=latent_dim
-        )
-        self.decoder = JointLimitDecoder(
-            latent_dim=latent_dim, 
-            hidden_dim=global_feat_dim // 4,
-            output_dim=output_limits_dim
-        )
-        
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def forward(self, joint_cloud):
-        # joint_cloud shape: [B, M, 4]
-        mu, logvar = self.encoder(joint_cloud)
-        z = self.reparameterize(mu, logvar)
-        limits_recon = self.decoder(z) # [B, 8]
-        return limits_recon, mu, logvar
+    # --- Run a forward pass ---
+    recon_cloud, mu, logvar = vae(dummy_input_cloud)
+    
+    # --- Check output shapes ---
+    print("\n--- Forward Pass Check ---")
+    print(f"Reconstructed cloud shape: {recon_cloud.shape}")
+    print(f"Mu shape: {mu.shape}")
+    print(f"LogVar shape: {logvar.shape}")
+    
+    # Verify shapes
+    assert recon_cloud.shape == (BATCH_SIZE, NUM_POINTS_K, 4)
+    assert mu.shape == (BATCH_SIZE, LATENT_DIM)
+    assert logvar.shape == (BATCH_SIZE, LATENT_DIM)
+    
+    print("\nAll shapes are correct!")

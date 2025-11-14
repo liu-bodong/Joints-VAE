@@ -1,0 +1,6 @@
+Loading dataset
+Dataset loaded.
+Starting training...
+Epoch 175/1500:  75%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████                                                  | 3/4 [00:00<00:00,  7.47it/s, Batch Loss=0.608, Recon Loss=0.597, KL Loss=10.8]
+Epoch 1/1500 | Total Loss: 1.6002 | Recon Loss: 1.6000 | KL Loss: 0.2557
+Epoch 100/1500 | Total Loss: 0.6238 | Recon Loss: 0.6100 | KL Loss: 13.7180
