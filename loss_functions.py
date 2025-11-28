@@ -1,121 +1,64 @@
 import torch
 import torch.nn as nn
-import kaolin.metrics.pointcloud as kaolin_pc
+from chamferdist import ChamferDistance
 # from pytorch3d.loss import chamfer_distance
 
 
-# --- KAOLIN ---
-def vae_loss_function(a, b, mu, logvar, beta=1.0):
+def vae_loss_function(recon_cloud, input_cloud, mu, logvar, beta=1.0):
     """
-    Calculates the combined VAE loss (using Kaolin).
+    TODO: write this later
     """
-    
-    recon_loss = kaolin_pc.chamfer_distance(a, b)
+    chamfer_dist = ChamferDistance()
+
+    recon_loss = chamfer_dist(input_cloud, recon_cloud, bidirectional=True, point_reduction='mean', batch_reduction='mean')
     recon_loss = recon_loss.mean()
-        
-    kl_loss  = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+    
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
     kl_loss = kl_loss.mean()
     
     total_loss = recon_loss + (beta * kl_loss)
     
-    return total_loss, recon_loss, kl_loss
+    return total_loss, recon_loss, kl_loss 
 
 
-# --- CUSTOM chamfer distance ---
-def custom_reconstruction_loss(input_cloud, recon_cloud):
+def flow_matching_loss(model, x_1, kl_weight=0.001):
     """
-    Calculates the Chamfer Distance in pure PyTorch.
-    
-    Args:
-        input_cloud (torch.Tensor): The original cloud, shape [B, K, 4]
-        recon_cloud (torch.Tensor): The reconstructed cloud, shape [B, K, 4]
-        
-    Returns:
-        torch.Tensor: A single loss value.
+    x_1: Real joint data batch [B, K, 4]
     """
+    device = x_1.device
+    B, K, D = x_1.shape
     
-    # 1. Calculate the pairwise distance matrix
-    # This is the O(K^2) step and is memory-intensive!
-    # dist_matrix shape: [B, K, K]
-    # dist_matrix[b, i, j] = distance from point i in input to point j in recon
-    dist_matrix = torch.cdist(input_cloud, recon_cloud, p=2.0) # p=2.0 for L2 distance
+    # --- 1. VAE Encoding ---
+    # Get the concise profile 'z'
+    z, mu, logvar = model(x_1)
     
-    # 2. Find nearest neighbors (A -> B)
-    # For each point in the input, find its closest point in the recon
-    # .values -> just get the distances, not the indices
-    # min_dists_a_to_b shape: [B, K]
-    min_dists_a_to_b, _ = torch.min(dist_matrix, dim=2)
+    # --- 2. Flow Matching Setup ---
+    # Sample Noise (Source)
+    x_0 = torch.randn_like(x_1)
     
-    # 3. Find nearest neighbors (B -> A)
-    # For each point in the recon, find its closest point in the input
-    # min_dists_b_to_a shape: [B, K]
-    min_dists_b_to_a, _ = torch.min(dist_matrix, dim=1)
-
-    # 4. Sum the distances and take the mean
-    # We take the mean across the batch and the points
-    loss_a_to_b = min_dists_a_to_b.mean()
-    loss_b_to_a = min_dists_b_to_a.mean()
+    # Sample Time t [0, 1]
+    t = torch.rand(B, device=device)
     
-    # The final Chamfer distance is the sum of both terms
-    chamfer_loss = loss_a_to_b + loss_b_to_a
+    # Linear Interpolation (Conditional Flow Matching path)
+    # x_t = t * x_1 + (1 - t) * x_0
+    t_view = t.view(B, 1, 1)
+    x_t = t_view * x_1 + (1 - t_view) * x_0
     
-    return chamfer_loss
-
-def vae_loss_function(recon_cloud, input_cloud, mu, logvar, beta=1.0):
+    # Target Velocity (Points straight from Noise to Data)
+    target_v = x_1 - x_0
     
-    # Use our new pure-pytorch function!
-    recon_loss = custom_reconstruction_loss(input_cloud, recon_cloud)
+    # --- 3. Prediction ---
+    # Predict velocity at x_t, conditioned on profile z
+    pred_v = model.decoder(x_t, t, z)
     
-    kld_loss = kl_loss = kld_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
-    kl_loss = kl_loss.mean()
+    # --- 4. Loss ---
+    # Simple MSE! (Much faster and stable than Chamfer)
+    fm_loss = F.mse_loss(pred_v, target_v)
     
-    total_loss = recon_loss + (beta * kld_loss)
+    # Add VAE regularization
+    # (Use the mean-reduction trick we discussed)
+    kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     
-    return total_loss, recon_loss, kld_loss
-
-
-
-
-# --- BELOW is pytorch3d version ---
-
-# def reconstruction_loss(input_cloud, recon_cloud):
-#     """
-#     Calculates the Chamfer Distance between two point clouds.
+    total_loss = fm_loss + (kl_weight * kld_loss)
     
-#     Args:
-#         input_cloud (torch.Tensor): The original cloud, shape [B, K, 4]
-#         recon_cloud (torch.Tensor): The reconstructed cloud, shape [B, K, 4]
-        
-#     Returns:
-#         torch.Tensor: A single loss value.
-#     """
-#     # The pytorch3d chamfer_distance function returns the loss
-#     # and (optionally) the nearest-neighbor indices. We just need the loss.
-#     # It handles batches automatically.
-    
-#     # NOTE: It's crucial that both tensors are on the same device (e.g., 'cuda')
-#     chamfer_loss, _ = chamfer_distance(input_cloud, recon_cloud)
-    
-#     return chamfer_loss
-
-
-
-
-# def vae_loss_function(recon_cloud, input_cloud, mu, logvar, beta=1.0):
-#     """
-#     Calculates the combined VAE loss.
-#     loss = Reconstruction_Loss + beta * KL_Divergence_Loss
-    
-#     'beta' is a hyperparameter to balance the two losses.
-#     """
-    
-#     # 1. Reconstruction Loss (how well we rebuilt the cloud)
-#     recon_loss = reconstruction_loss(input_cloud, recon_cloud)
-    
-#     # 2. KL Divergence (how "regularized" the latent space is)
-#     kld_loss = kl_divergence_loss(mu, logvar)
-    
-#     # 3. Total Loss
-#     total_loss = recon_loss + (beta * kld_loss)
-    
-#     return total_loss, recon_loss, kld_loss
+    return total_loss, fm_loss, kld_loss

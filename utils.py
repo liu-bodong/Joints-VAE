@@ -1,42 +1,34 @@
 
 import torch
+import numpy as np
 
-def chamfer_loss(cloud1, cloud2):
-    
+def annealing(step, k=0.0025, x0=2500):
     """
-    Calculates the Chamfer Distance between two point clouds in pure PyTorch.
-    
+    Sigmoid annealing function.
     Args:
-        cloud1 (torch.Tensor): (B, N, 3) tensor of the first point cloud.
-        cloud2 (torch.Tensor): (B, M, 3) tensor of the second point cloud.
-
-    Returns:
-        torch.Tensor: The Chamfer loss.
+        step (int): Current training step.
+        k (float): Steepness of the curve.
+        x0 (int): Midpoint of the curve.
     """
-    
-    cloud1 = cloud1.float()
-    cloud2 = cloud2.float()
+    return float(1 / (1 + torch.exp(-k * (step - x0))))
 
-    # Calculate the pairwise distance matrix
-    # p1_dists will be [B, N, M], where p1_dists[i, j, k] is the distance
-    # between the j-th point in the i-th batch of cloud1 and the
-    # k-th point in the i-th batch of cloud2.
-    p1_dists = torch.cdist(cloud1, cloud2)
 
-    # For each point in cloud1, find the minimum distance to any point in cloud2
-    dist_c1_to_c2 = p1_dists.min(dim=2)[0] #[B, N]
-    
-    # For each point in cloud2, find the minimum distance to any point in cloud1
-    # dist_c2_to_c1 will be (B, M)
-    dist_c2_to_c1 = p1_dists.min(dim=1)[0]
-
-    # avg the distances
-    # loss_c1 is the mean dist from cloud1 to cloud2
-    # loss_c2 is the mean dist from cloud2 to cloud1
-    loss_c1 = dist_c1_to_c2.mean(dim=1)
-    loss_c2 = dist_c2_to_c1.mean(dim=1)
-
-    # The final Chamfer loss is the sum of these two, mean over the batch
-    loss = (loss_c1 + loss_c2).mean()
-    
-    return loss
+def ramp(step, rampup_length=1000, direction=1):
+    """
+    Exponential ramp function.
+    Args:
+        step (int): Current training step.
+        rampup_length (int): Length of the ramp-up period.
+        direction (int): 1 for ramp-up, -1 for ramp-down.
+    Returns:
+        float: Ramp value between 0 and 1.
+    """
+    if rampup_length == 0:
+        return 1.0
+    else:
+        current = np.clip(step, 0.0, rampup_length)
+        phase = 1.0 - current / rampup_length
+        if direction == 1:
+            return float(np.exp(-5.0 * phase * phase))
+        else:
+            return float(1.0 - np.exp(-5.0 * phase * phase))

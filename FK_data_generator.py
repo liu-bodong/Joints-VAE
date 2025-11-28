@@ -237,19 +237,19 @@ def get_dataset(num_users, num_points_per_user, epsilon, workspace_min, workspac
 
 # Main function for generating np data and saving to disk
 if __name__ == "__main__":
-    NUM_PROFILES = 1000
-    POINT_CLOUD_SIZE = 2048 
-    EPSILON = 0.02  # meters
+    NUM_PROFILES = 4096
+    POINT_CLOUD_SIZE = 4096 
+    EPSILON = 0.01  # meters
     
     WORKSPACE_MIN = np.array([-0.7, -0.7, -0.7])
     WORKSPACE_MAX = np.array([ 0.7,  0.7,  0.7])
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    PATH = f"./data/joint_data_{NUM_PROFILES}_{POINT_CLOUD_SIZE}.npy"
+
     
     all_joints = generate_data(
-        num_users=NUM_PROFILES,
+        num_users=NUM_PROFILES + 200,
         num_points_per_user=POINT_CLOUD_SIZE,
         epsilon=EPSILON,
         workspace_min=WORKSPACE_MIN,
@@ -261,9 +261,12 @@ if __name__ == "__main__":
     #     print(f"User {i+1} joint data shape: {all_joints[i].shape}")
     
     all_joints = np.stack(all_joints, axis=0, dtype=np.float32)  # Shape [num_users, num_points_per_user, 4]
+    all_joints = all_joints[:NUM_PROFILES, :, :] 
     
     print("Data generation complete.")
     print("Shape: ", all_joints.shape)  # Should be [4096, 4] for each user
+
+    PATH = f"./data/joint_data_{all_joints.shape[0]}_{all_joints.shape[1]}.npy"
     
     
     # Save to disk 
