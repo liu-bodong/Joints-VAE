@@ -196,10 +196,10 @@ class FoldingNetDecoderV1(nn.Module):
         folding2_out = self.fold2(cat2)
         
         
-        cat3 = torch.cat([folding2_out, z_expanded], dim=2)
-        folding3_out = self.fold3(cat3)  # [B, K, n]
+        # cat3 = torch.cat([folding2_out, z_expanded], dim=2)
+        # folding3_out = self.fold3(cat3)  # [B, K, n]
         
-        return folding3_out #, folding2_out
+        return folding2_out #, folding2_out
     
     
 class FoldingNetV1(nn.Module):
@@ -358,9 +358,9 @@ class PointVAE(nn.Module):
 if __name__ == "__main__":
     
     # --- Define model hyperparameters ---
-    LATENT_DIM = 32         # Size of the latent vector z
+    LATENT_DIM = 16         # Size of the latent vector z
     NUM_POINTS_K = 4096     # Number of points per user (must match data)
-    BATCH_SIZE = 8          # Number of point clouds/profiles/users in a batch
+    BATCH_SIZE = 256          # Number of point clouds/profiles/users in a batch
     
     # --- Create a dummy input batch ---
     # This simulates one batch from DataLoader
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     print(f"Input batch shape: {dummy_input_cloud.shape}")
     
     # --- Instantiate the VAE ---
-    vae = PointVAE(latent_dim=LATENT_DIM, num_points_k=NUM_POINTS_K)
+    vae = FoldingNetV1(latent_dim=LATENT_DIM, num_points_k=NUM_POINTS_K).to(torch.device("cpu"))
     print("\nVAE Model Instantiated:")
     print(vae)
 
@@ -388,3 +388,9 @@ if __name__ == "__main__":
     assert logvar.shape == (BATCH_SIZE, LATENT_DIM)
     
     print("\nAll shapes are correct!")
+    
+    total_params = sum(p.numel() for p in vae.parameters() if p.requires_grad)
+    print(f"\nTotal trainable parameters in the VAE: {total_params}")
+    
+    total_memory = sum(p.element_size() * p.nelement() for p in vae.parameters())
+    print(f"Total memory usage for parameters: {total_memory / (1024 **2):.2f} MB")

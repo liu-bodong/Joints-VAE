@@ -1,10 +1,11 @@
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+import os
 import numpy as np
 import tqdm
 import wandb
-import os
+import random
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 
 from draw_pair_plot import draw
 from network import FoldingNetV1, FoldingNetV2
@@ -12,188 +13,221 @@ from loss_functions import vae_loss_function
 from validate import validate
 
 
-def train(num_epochs, learning_rate, batch_size, kl_weight, num_users, points_per_user, latent_dim, train_loader, device, enable_wandb):
-    print(kl_weight)
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def train(model, optimizer, scheduler, train_loader, val_loader, config, device, run, enable_wandb):
+    
+    num_epochs = config['num_epochs']
+    kl_weight = config['kl_weight']
+    run_dir = config['run_dir']
+    
+    best_val_loss = float('inf')
+    
+    try:
+        for epoch in range(num_epochs):
+            model.train()
+            
+            epoch_loss = 0.0
+            epoch_recon_loss = 0.0
+            epoch_kl_loss = 0.0
+            
+            progress_bar = tqdm.tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
+            
+            for (input_cloud,) in progress_bar:
+                input_cloud = input_cloud.to(device)
+                
+                # --- Forward Pass ---
+                recon_cloud, mu, logvar = model(input_cloud)
+                # print(recon_cloud.shape, input_cloud.shape)
+                
+                # --- Calculate Loss ---
+                total_loss, recon_loss, kl_loss = vae_loss_function(
+                    recon_cloud,
+                    input_cloud,
+                    mu,
+                    logvar,
+                    kl_weight
+                )
+                
+                total_loss = total_loss.mean()
+                recon_loss = recon_loss.mean()
+                kl_loss = kl_loss.mean()
+                
+                # --- Backward Pass ---
+                optimizer.zero_grad()
+                total_loss.backward()
+                
+                optimizer.step()
+                
+                # --- Log batch losses ---
+                epoch_loss += total_loss.item()
+                epoch_recon_loss += recon_loss.item()
+                epoch_kl_loss += kl_loss.item()
+                
+                progress_bar.set_postfix({
+                    "Batch Loss": total_loss.item(),
+                    "Recon Loss": recon_loss.item(),
+                    "KL Loss": kl_loss.item()
+                })
+            
+            # --- End of Epoch: Averages ---
+            avg_train_loss = epoch_loss / len(train_loader)
+            avg_train_recon = epoch_recon_loss / len(train_loader)
+            avg_train_kl = epoch_kl_loss / len(train_loader)
+            
+        # 1. Validation Step (Every 20 epochs to save time)
+            if (epoch + 1) % 20 == 0:
+                val_total, val_recon, val_kl = validate(model, val_loader, kl_weight, device)
+                
+                # Learning Rate Scheduler Step
+                # Reduce LR if validation loss plateaus
+                if scheduler:
+                    scheduler.step(val_total)
+                    current_lr = optimizer.param_groups[0]['lr']
+                else:
+                    current_lr = config['learning_rate']
+
+                # WandB Logging
+                if run:
+                    run.log({
+                        "epoch": epoch,
+                        "train/total_loss": avg_train_loss,
+                        "train/recon_loss": avg_train_recon,
+                        "train/kl_loss": avg_train_kl,
+                        "val/total_loss": val_total,
+                        "val/recon_loss": val_recon,
+                        "val/kl_loss": val_kl,
+                        "learning_rate": current_lr
+                    })
+                
+                # print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_total:.4f} | LR: {current_lr:.2e}")
+
+                # 2. Checkpoint: Best Model
+                if epoch > 10000 and val_total < best_val_loss - 1e-7:
+                    best_val_loss = val_total
+                    torch.save(model.state_dict(), os.path.join(run_dir, "best_model.pth"))
+            
+            else:
+                # Just log train stats if no validation this epoch
+                if run:
+                    run.log({
+                        "epoch": epoch,
+                        "train/total_loss": avg_train_loss,
+                        "train/recon_loss": avg_train_recon,
+                        "train/kl_loss": avg_train_kl
+                    })
+
+            # 3. Checkpointing: Periodic (10k, 12k, 15k)
+            if (epoch + 1) == 10000 or (epoch + 1) == 12000 or (epoch + 1) == 15000:
+                save_name = f"checkpoint_epoch_{epoch+1}.pth"
+                torch.save(model.state_dict(), os.path.join(run_dir, save_name))
+
+        print("Training complete.")
+        
+    except KeyboardInterrupt:
+        print("\n\n"+ "-" * 30)
+        print("Training interrupted.")
+        print("Saving last model...")
     
 
-    if enable_wandb:
-        # --- Setup Weights & Biases ---
-        run = wandb.init(
-            entity = "liubodong-cornell-university",
-            project = "ROMA-VAE-Few-Sample-Overfit",
-            name = f"FoldingNetVae_3fold_profiles{num_users}_latent{latent_dim}_points{points_per_user}_kl{kl_weight}_lr{learning_rate}_bs{batch_size}",
-            config = {
-                "num_epochs": num_epochs,
-                "learning_rate": learning_rate,
-                "batch_size": batch_size,
-                "kl_weight": kl_weight,
-                "num_users": num_users,
-                "points_per_user": points_per_user,
-                "latent_dim": latent_dim
-            },
-            mode = "online"
-        )
-
-
-    # --- Initialize Model ---
-    model = FoldingNetV1(latent_dim=latent_dim, num_points_k=points_per_user).to(device)
+    torch.save(model.state_dict(), os.path.join(run_dir, "last_model.pth"))
     
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-    # --- Main Training Loop ---
-    print("Starting training...")
-    for epoch in range(num_epochs):
-        
-        epoch_loss = 0.0
-        epoch_recon_loss = 0.0
-        epoch_kld_loss = 0.0
-        
-        progress_bar = tqdm.tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
-        
-        # We get (batch_data,) because our dataset returns a list
-        for (input_cloud,) in progress_bar:
-            
-            input_cloud = input_cloud.to(device)
-            
-            # --- Forward Pass ---
-            recon_cloud, mu, logvar = model(input_cloud)
-            # print(recon_cloud.shape, input_cloud.shape)
-            
-            # --- Calculate Loss ---
-            total_loss, recon_loss, kl_loss = vae_loss_function(
-                recon_cloud,
-                input_cloud,
-                mu,
-                logvar,
-                kl_weight
-            )
-            
-            total_loss = total_loss.mean()
-            recon_loss = recon_loss.mean()
-            kl_loss = kl_loss.mean()
-            
-            # --- Backward Pass ---
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
-            
-            # --- Log batch losses ---
-            epoch_loss += total_loss.item()
-            epoch_recon_loss += recon_loss.item()
-            epoch_kld_loss += kl_loss.item()
-            
-            progress_bar.set_postfix({
-                "Batch Loss": total_loss.item(),
-                "Recon Loss": recon_loss.item(),
-                "KL Loss": kl_loss.item()
-            })
-        
-        # --- End of Epoch: Print Averages ---
-        avg_loss = epoch_loss / len(train_loader)
-        avg_recon = epoch_recon_loss / len(train_loader)
-        avg_kld = epoch_kld_loss / len(train_loader)
-        
-        if enable_wandb:
-            run.log({
-                "total_loss": avg_loss,
-                "recon_loss": avg_recon,
-                "kl_loss": avg_kld
-            })
-        
-        # TODO: write early stopping logic
-        # TODO: also save checkpoints so we could manually stopit
-        # if epoch >= 2000 and 
-
-    print("Training complete.")
+    return
     
-    if enable_wandb:
+    
+def main():
+    # TODO: Change hyperparams
+    config = {
+        'num_epochs': 20000,
+        'learning_rate': 1e-4,
+        'batch_size': 128,
+        'kl_weight': 0,
+        'num_users': 1024,
+        'points_per_user': 4096,
+        'latent_dim': 16,
+        'seed': 42,
+        'run_dir': None
+    }
+    
+    # TODO: Double check the paths
+    base_run_dir = "./runs/"
+    exp_name = f"N{config['num_users']}_K{config['points_per_user']}_D{config['latent_dim']}_KL{config['kl_weight']}"
+    config['run_dir'] = os.path.join(base_run_dir, exp_name)
+    os.makedirs(config['run_dir'], exist_ok=True)  
+          
+    data_path = f"data/4joints_N{config['num_users']}_K{config['points_per_user']}.npy"
+    
+    setup_seed(config['seed'])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # TODO: Double check the logging 
+    run = wandb.init(
+        entity="liubodong-cornell-university",
+        project="ROMA-VAE",
+        name=exp_name,
+        config=config,
+        mode="online"  # Change to "offline" if you want to log locally only
+    )
+
+    data = np.load(data_path)  # shape: (num_users, num_points_per_user, 4)
+    val_size = int(config['num_users'] * 0.125)
+    
+    val_data = data[:val_size, :config['points_per_user'], :]
+    val_dataset = TensorDataset(torch.tensor(val_data, dtype=torch.float32))
+    val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False)
+    
+    
+    train_data = data[val_size:, :config['points_per_user'], :]
+    dataset = TensorDataset(torch.tensor(train_data, dtype=torch.float32))
+    train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True)
+    
+    
+    # TODO: Double check the these
+    model = FoldingNetV1(latent_dim=config['latent_dim'], num_points_k=config['points_per_user']).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50, verbose=True)
+    
+    train(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        config=config,
+        device=device,
+        run=run,
+        enable_wandb=True
+    )
+        
+    doc_path = os.path.join(config['run_dir'], "desc.txt")
+    with open(doc_path, 'w') as f:
+        for key, value in config.items():
+            f.write(f"{key}: {value}\n")
+            
+    # Draw final plots (Using the BEST model, not necessarily the last one)
+    # Reload best weights
+    best_path = os.path.join(config['run_dir'], "best_model.pth")
+    if os.path.exists(best_path):
+        model.load_state_dict(torch.load(best_path))
+        print("Loaded Best Model for visualization.")
+    else:
+        best_path = os.path.join(config['run_dir'], "last_model.pth")
+        model.load_state_dict(torch.load(best_path))
+    
+    # Generate visualization (assuming draw_pair_plot handles the logic)
+    # Passing the path where images should be saved
+    draw(config['latent_dim'], config['points_per_user'], best_path, val_data_path, count=5)
+
+    if run:
         run.finish()
     
-    return model
-    
-    
+
 if __name__ == "__main__":
-   
-    
-    NUM_EPOCHS = 10000
-    LEARNING_RATE = 1e-4
-    BATCH_SIZE = 256
-    KL_WEIGHT = 0
-    
-    NUM_USERS = 1
-    POINTS_PER_USER = 4096
-    
-    LATENT_DIM = 8
-    primitive = "4d_cube_regular" 
-    
-    run_dir = f"./runs/3fold_{primitive}_N{NUM_USERS}_K{POINTS_PER_USER}_D{LATENT_DIM}_KL{KL_WEIGHT}"
-    
-
-    
-    train_data_path = f"data\sirs_dense_N10_K4096.npy"
-    val_data_path = "data\sirs_dense_N10_K4096.npy"
-    
-    model_path = f"/1fold_{primitive}_N{NUM_USERS}_K{POINTS_PER_USER}_D{LATENT_DIM}_KL{KL_WEIGHT}.pth"
-    doc_path  = f"/doc.txt"
-    save_path = run_dir + model_path
-    print(f"Save path: {save_path}")
-    doc_path = run_dir + doc_path
-    print(f"Doc path: {doc_path}")
-    
-    
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {DEVICE}")    
-    
-    # --- Load Data ---
-    print("Loading dataset")
-    train_data = np.load(train_data_path)  # shape: (num_users, num_points_per_user, 4)
-    train_data = train_data[:NUM_USERS, :POINTS_PER_USER, :]
-    dataset = TensorDataset(torch.tensor(train_data, dtype=torch.float32))
-    train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-    
-    val_data = np.load(val_data_path)  # shape: (num_users, num_points_per_user, 4)
-    val_data = val_data[:NUM_USERS, :POINTS_PER_USER, :]
-    val_dataset = TensorDataset(torch.tensor(val_data, dtype=torch.float32))
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-    
-    
-    print("Dataset loaded.")
-    
-    print(f"Configs: ")
-
-    model = train(
-                num_epochs=NUM_EPOCHS, 
-                learning_rate=LEARNING_RATE, 
-                batch_size=BATCH_SIZE, 
-                kl_weight=KL_WEIGHT, 
-                num_users=NUM_USERS, 
-                points_per_user=POINTS_PER_USER, 
-                latent_dim=LATENT_DIM, 
-                train_loader=train_loader, 
-                device=DEVICE,
-                enable_wandb=True
-        )
-    
-    os.makedirs(run_dir, exist_ok=True)
-    torch.save(model.state_dict(), save_path)
-    print(f"Model saved to {save_path}")
-    
-    validate(model, val_loader, KL_WEIGHT, DEVICE)
-    
-    with open(doc_path, 'w') as f:
-        f.write(f"Number of Epochs: {NUM_EPOCHS}\n")
-        f.write(f"Learning Rate: {LEARNING_RATE}\n")
-        f.write(f"Batch Size: {BATCH_SIZE}\n")
-        f.write(f"KL Weight: {KL_WEIGHT}\n")
-        f.write(f"Number of Users: {NUM_USERS}\n")
-        f.write(f"Points per User: {POINTS_PER_USER}\n")
-        f.write(f"Latent Dimension: {LATENT_DIM}\n")
-        f.write(f"Training Data Path: {train_data_path}\n")
-        f.write(f"Validation Data Path: {val_data_path}\n")
-        f.write("Primitive type: " + primitive + "\n")
-        
-    draw(LATENT_DIM, POINTS_PER_USER, save_path, val_data_path, count=3)   
-    
-    
-    
-    
+    main()

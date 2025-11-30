@@ -213,6 +213,31 @@ def plot_N_joint_pairplots(joint_clouds, marker_size):
     plt.suptitle("Joint Pairplot - All Profiles", y=1.02)
     plt.show()
     
+
+def plot_N_pair_comparison_joint_pairplots(joint_clouds_1, joint_clouds_2, marker_size):
+    N = joint_clouds_1.shape[0]
+    joint_names = ['Abduction (Ry)', 'Flexion (Rx)', 'Rotation (Rz)', 'Elbow (Rx)']
+    
+    for i in range(N):
+        joint_cloud_1 = joint_clouds_1[i]
+        joint_cloud_2 = joint_clouds_2[i]
+        
+        if isinstance(joint_cloud_1, torch.Tensor):
+            joint_cloud_1 = joint_cloud_1.cpu().numpy()
+        if isinstance(joint_cloud_2, torch.Tensor):
+            joint_cloud_2 = joint_cloud_2.cpu().numpy()
+        
+        df1 = pd.DataFrame(joint_cloud_1, columns=joint_names)
+        df1['Type'] = 'Original'
+        
+        df2 = pd.DataFrame(joint_cloud_2, columns=joint_names)
+        df2['Type'] = 'Reconstructed'
+        
+        combined_df = pd.concat([df1, df2], ignore_index=True)
+        
+        sns.pairplot(combined_df, hue='Type', plot_kws={'s': marker_size}, diag_kind='kde', diag_kws={'fill': False}, palette='Set1')
+        plt.suptitle(f"Joint Pairplot Comparison - Sample {i+1}", y=1.02)
+        plt.show()
     
     
     

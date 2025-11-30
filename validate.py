@@ -2,60 +2,69 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import torch
+import tqdm
 from torch.utils.data import DataLoader, TensorDataset
 import seaborn as sns
 from sklearn.manifold import TSNE
 
 
-import kinematics
-import FK_data_generator
 import network
 from loss_functions import vae_loss_function
 import visualization
 
 
 def validate(model, val_loader, kl_weight, device):
-    avg_total_loss = 0.0
-    avg_recon_loss = 0.0
-    avg_kl_loss = 0.0
+    """
+    Runs evaluation on the validation dataset.
+
+    Args:
+        model (_type_): _description_
+        val_loader (_type_): _description_
+        kl_weight (_type_): _description_
+        device (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    model.eval()
+    total_val_loss = 0.0
+    total_recon_loss = 0.0
+    total_kl_loss = 0.0
+    
+    progress_bar = tqdm.tqdm(val_loader, desc="Validation", leave=False)
             
-    with torch.no_grad():  
-        for (x,) in val_loader:
-            x = x.to(device)  # shape: (batch_size, num_points_per_user, 4)
-            recon_x, mu, logvar = model(x)
+    with torch.no_grad():
+        for (input_cloud,) in progress_bar:
+            input_cloud = input_cloud.to(device)  # [batch_size, num_points_per_user, 4]
             
-            loss, recon_loss, kl_loss = vae_loss_function(
-                    recon_x,
-                    x,
+            recon_cloud, mu, logvar = model(input_cloud)
+            
+            total_loss, recon_loss, kl_loss = vae_loss_function(
+                    recon_cloud,
+                    input_cloud,
                     mu,
                     logvar,
                     kl_weight
                 )
 
-            epoch_total_loss = loss.mean().item()
-            epoch_recon_loss = recon_loss.mean().item()
-            epoch_kl_loss = kl_loss.mean().item()
+            total_val_loss += total_loss.item()
+            total_recon_loss += recon_loss.item()
+            total_kl_loss += kl_loss.item()
             
-            avg_total_loss += epoch_total_loss
-            avg_recon_loss += epoch_recon_loss
-            avg_kl_loss += epoch_kl_loss
-            
-
     num_batches = len(val_loader)
-    print(f"Validation Total Loss: {avg_total_loss / num_batches}, \
-            Recon Loss: {avg_recon_loss / num_batches}, \
-            KL Loss: {avg_kl_loss / num_batches}")   
+    avg_total = total_val_loss / num_batches
+    avg_recon = total_recon_loss / num_batches
+    avg_kl = total_kl_loss / num_batches
     
+    progress_bar.set_postfix({
+        "Val Total Loss": avg_total,
+        "Val Recon Loss": avg_recon,
+        "Val KL Loss": avg_kl
+    })
+    
+    return avg_total, avg_recon, avg_kl
 
-    return avg_total_loss / num_batches, avg_recon_loss / num_batches, avg_kl_loss / num_batches
-
-
-    # visualization.plot_N_joint_pairplots(joint_clouds[:10], marker_size=3)
-    # with torch.no_grad():
-    #     joint_clouds = torch.tensor(joint_clouds, dtype=torch.float32)
-    #     recon_val_joints, _, _ = model(joint_clouds.to(device))
-    # visualization.plot_N_joint_pairplots(recon_val_joints[:10].cpu().numpy(), marker_size=3)  
-        
+ 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,7 +77,7 @@ if __name__ == "__main__":
     KL_WEIGHT = 0.0
 
 
-    model = network.FoldingNetVAE(latent_dim=LATENT_DIM, num_points_k=NUM_POINTS_K).to(device)
+    model = network.FoldingNetV1(latent_dim=LATENT_DIM, num_points_k=NUM_POINTS_K).to(device)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
     model.eval()
 
