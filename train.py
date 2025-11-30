@@ -133,7 +133,7 @@ def train(model, optimizer, scheduler, train_loader, val_loader, config, device,
     except KeyboardInterrupt:
         print("\n\n"+ "-" * 30)
         print("Training interrupted.")
-        print("Saving last model...")
+        print("Saving last model.- Updated `archive/task_vae.ipynb` with new training and validation logic for task-space point clouds...")
     
 
     torch.save(model.state_dict(), os.path.join(run_dir, "last_model.pth"))
@@ -223,7 +223,7 @@ def main():
     
     # Generate visualization (assuming draw_pair_plot handles the logic)
     # Passing the path where images should be saved
-    draw(config['latent_dim'], config['points_per_user'], best_path, val_data_path, count=5)
+    draw(config['latent_dim'], config['points_per_user'], best_path, val_data, count=5)
 
     if run:
         run.finish()

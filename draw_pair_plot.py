@@ -14,7 +14,7 @@ from loss_functions import vae_loss_function
 import visualization
 
 
-def draw(latent_dim, k_num_points, model_path, data_path, count=1):   
+def draw(latent_dim, k_num_points, model_path, val_data, count=1):   
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -23,13 +23,9 @@ def draw(latent_dim, k_num_points, model_path, data_path, count=1):
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
-    joint_clouds = np.load(data_path)  # [num_users, num_points_per_user, 4]
-    dataset = TensorDataset(torch.tensor(joint_clouds).float())
-    val_loader = DataLoader(dataset, batch_size=16, shuffle=False)
-
-    visualization.plot_N_joint_pairplots(joint_clouds[0:count], marker_size=3)
+    visualization.plot_N_joint_pairplots(val_data[0:count], marker_size=3)
     with torch.no_grad():
-        recon_cloud_1, _, _ = model(torch.tensor(joint_clouds[0:count], dtype=torch.float32).to(device))
+        recon_cloud_1, _, _ = model(torch.tensor(val_data[0:count], dtype=torch.float32).to(device))
     visualization.plot_N_joint_pairplots(recon_cloud_1.cpu().numpy(), marker_size=3)
     # visualization.plot_N_joint_pairplots(recon_cloud_2.cpu().numpy(), marker_size=3)
     
